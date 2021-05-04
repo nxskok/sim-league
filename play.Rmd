@@ -3,7 +3,9 @@ packages
 ```{r}
 library(tidyverse)
 library(conflicted)
+library(rvest)
 conflict_prefer("filter", "dplyr")
+source("functions.R")
 ```
 
 get general stuff
@@ -16,26 +18,46 @@ league_ids <- readRDS("~/Documents/r-projects/ratings/league_ids.rds")
 get stuff for a country
 
 ```{r, message=FALSE}
-get_country <- function(this_league, league_ids, prior_year = 2021) {
-  league_ids %>% 
-    mutate(row = row_number()) %>% 
-    filter(row == this_league) -> d
-  country_name <- d$the_country
-  country_lower <- tolower(country_name)
-  country_comps <- d$id[[1]]
-  rating_dir <- "../ratings/"
-  priorname <- str_c(rating_dir, 
-                     country_lower, 
-                     prior_year,
-                     "_prior.csv")
-  postname <- str_c(rating_dir, country_lower,"_post.rds")
-  prior <- read_csv(priorname)
-  read_rds(postname) %>% rstan::extract() -> rat
-  
-  list(name = country_name, comps = country_comps, 
-       prior = prior, rat = rat)
-}
-country_list <- get_country(2, league_ids) 
+country_list <- get_country(18, league_ids) 
+country_list$name
 ```
 
+get league table from scoresway
+
+```{r}
+league_id <- country_list$comps[1]
+league_id
+```
+
+```{r}
+base <- "https://uk.soccerway.com/national/andorra/1a-divisio/20202021/championship-round/r"
+url <- str_c(base, league_id, "/")
+html <- read_html(url)
+html %>% html_nodes("table") %>% .[2] -> tab
+tab %>% html_nodes("tr") %>% html_attr("class") %>% 
+  str_detect("team_rank") -> rows
+tab %>% html_table() %>% .[[1]] %>% 
+  select("Team", "MP", "F", "A", "P") %>% 
+  slice(which(rows)-1) -> league_table
+```
+
+also want to get team ids and colours
+
+```{r}
+tab %>% html_nodes("td") %>% html_attr("class") %>% 
+  str_subset("rank") %>% str_replace("^rank ", "") -> team_colours
+```
+
+```{r}
+tab %>% html_nodes("td") %>% html_nodes("a") %>% 
+  html_attr("href") %>% 
+  str_subset("^/teams") %>% 
+  str_extract("/[0-9]+/$") %>% 
+  parse_number() -> team_ids
+```
+
+```{r}
+league_table %>% 
+  mutate(colour = team_colours, team_id = team_ids)
+```
 
