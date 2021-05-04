@@ -84,8 +84,7 @@ get_lookup <- function(country_list) {
 get_basis <- function(league_table, lookup) {
   league_table %>%
     left_join(lookup, by=c("team_id"="sw_id")) %>% 
-    select(name, MP, P, team_id, stan_id) %>% 
-    left_join(post_mean, by = c("stan_id"="i"))
+    select(name, MP, P, F, A, team_id, stan_id) 
 }
 
 sim_games <- function(games_left, lookup, country_list) {
@@ -117,7 +116,7 @@ pt <- function(s1, s2) {
     )
 }
 
-# league table of just simulated games
+# league table of just simulated games using stan id
 
 extra_table <- function(d) {
   d %>% 
@@ -139,4 +138,20 @@ extra_table <- function(d) {
     unnest() %>% 
     group_by(id) %>% 
     summarize(across(c(m, pt, f, a), ~sum(.)))
+}
+
+simulated_table <- function(d, basis) {
+  e <- extra_table(d)
+  basis %>% left_join(e, by = c("stan_id" = "id")) %>% 
+    mutate(m = as.numeric(MP) + m,
+           pt = as.numeric(P) + pt,
+           f = as.numeric(F) + f,
+           a = as.numeric(A) + a) %>% 
+    select(team_id, name, m, f, a, pt) %>% 
+    arrange(desc(pt), desc(f-a), desc(f))
+}
+
+simulated_rank <- function(tab) {
+  tab %>% mutate(rank = row_number()) %>% 
+    select(team_id, rank)
 }

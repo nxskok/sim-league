@@ -4,6 +4,7 @@ packages
 library(tidyverse)
 library(conflicted)
 library(rvest)
+library(tidybayes)
 conflict_prefer("filter", "dplyr")
 source("functions.R")
 ```
@@ -13,51 +14,69 @@ get general stuff
 ```{r}
 games <- read_rds("../scoresway/rds/games.rds")
 league_ids <- readRDS("~/Documents/r-projects/ratings/league_ids.rds")
+league_id <- 18
+country_list <- get_country(league_id, league_ids) 
+comp <- country_list$comps[1]
+league_table <- get_league_table(country_list$comp) # have to get comp
+league_table
 ```
 
-get stuff for a country
-
-```{r, message=FALSE}
-country_list <- get_country(18, league_ids) 
-country_list$name
-```
-
-get league table from scoresway
+check league table
 
 ```{r}
-league_id <- country_list$comps[1]
-league_id
+summary <- season_summary(comp, games, league_table)
+summary
+if (summary$s > 0) stop("teams have different #games")
+season_games <- summary$m
+season_games
 ```
 
+
 ```{r}
-base <- "https://uk.soccerway.com/national/andorra/1a-divisio/20202021/championship-round/r"
-url <- str_c(base, league_id, "/")
-html <- read_html(url)
-html %>% html_nodes("table") %>% .[2] -> tab
-tab %>% html_nodes("tr") %>% html_attr("class") %>% 
-  str_detect("team_rank") -> rows
-tab %>% html_table() %>% .[[1]] %>% 
-  select("Team", "MP", "F", "A", "P") %>% 
-  slice(which(rows)-1) -> league_table
+draws <- get_draws(country_list)
+draws
 ```
 
-also want to get team ids and colours
+match this up with teams and league standings
 
 ```{r}
-tab %>% html_nodes("td") %>% html_attr("class") %>% 
-  str_subset("rank") %>% str_replace("^rank ", "") -> team_colours
+lookup <- get_lookup(country_list)
+basis <- get_basis(league_table, lookup)
+basis
 ```
 
 ```{r}
-tab %>% html_nodes("td") %>% html_nodes("a") %>% 
-  html_attr("href") %>% 
-  str_subset("^/teams") %>% 
-  str_extract("/[0-9]+/$") %>% 
-  parse_number() -> team_ids
+games_left <- get_games_left(comp, games)
+simulated <- sim_games(games_left, lookup, country_list)
+simulated # data has id1 id2 (stan ids), sc1, sc2
 ```
 
 ```{r}
-league_table %>% 
-  mutate(colour = team_colours, team_id = team_ids)
+simulated
 ```
+
+
+
+```{r}
+simulated %>% 
+  ungroup() %>% 
+  rowwise() %>% 
+  mutate(simtab = list(simulated_table(data, basis))) %>% 
+  mutate(rk = list(simulated_rank(simtab))) -> d
+d %>% unnest(rk) %>% 
+  group_by(team_id) %>% 
+  count(rank) %>% 
+  mutate(cum_n = cumsum(n)) -> dd
+# save this and then consult by colour
+dd %>% 
+  filter(rank<=24) %>% 
+  group_by(team_id) %>% 
+  filter(rank==max(rank)) %>% 
+  arrange(desc(cum_n), rank)%>% 
+  left_join(lookup, by = c("team_id" = "sw_id")) %>% 
+  select(name, rank, cum_n)
+```
+
+
+
 
