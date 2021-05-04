@@ -1,0 +1,40 @@
+packages
+
+```{r}
+library(tidyverse)
+library(conflicted)
+```
+
+get general stuff
+
+```{r}
+games <- read_rds("../scoresway/rds/games.rds")
+league_ids <- readRDS("~/Documents/r-projects/ratings/league_ids.rds")
+```
+
+get stuff for a country
+
+```{r}
+get_country <- function(id, league_ids, prior_year = 2021) {
+  league_ids %>% 
+    mutate(row = row_number()) %>% 
+    filter(id == row) 
+}
+get_country(2, league_ids)
+```
+
+
+for getting country
+
+```{r}
+country_lower=tolower(country)
+prior_year <- 2020
+rating_dir <- "../ratings/"
+priorname <- str_c(rating_dir, country_lower, prior_year,"_prior.csv")
+prepostname <- str_c(rating_dir, country_lower,"_pre_post.rds")
+postname <- str_c(rating_dir, country_lower,"_post.rds")
+# postname
+prior <- get_prior(priorname)
+read_rds(post_name) %>% rstan::extract() -> rat
+```
+
