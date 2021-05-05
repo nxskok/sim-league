@@ -5,77 +5,52 @@ library(tidyverse)
 library(conflicted)
 library(rvest)
 library(tidybayes)
+library(progress)
 conflict_prefer("filter", "dplyr")
+conflict_prefer("lag", "dplyr")
 source("functions.R")
 ```
+
 
 get general stuff
 
 ```{r}
 games <- read_rds("../scoresway/rds/games.rds")
 league_ids <- readRDS("~/Documents/r-projects/ratings/league_ids.rds")
-league_id <- 18
-country_list <- get_country(league_id, league_ids) 
-comp <- country_list$comps[1]
-league_table <- get_league_table(country_list$comp) # have to get comp
-league_table
+league_ids %>% 
+  mutate(r = row_number()) %>% 
+  unnest(id)
 ```
+
+```{r}
+league_id <- 5
+comp_no <- 1
+comp <- get_country(league_id, league_ids)$comps[comp_no]
+comp
+# get_country(league_id, league_ids)
+# get_league_table(comp)
+nsim <- 100
+pb <- progress_bar$new(format = " progress [:bar] :percent eta: :eta", total = nsim, width=50)
+run(league_id, league_ids, games, pb, comp_no, nsim)
+```
+
 
 check league table
 
 ```{r}
-summary <- season_summary(comp, games, league_table)
+lt <- get_league_table(comp)
+lt
+summary <- season_summary(comp, games, lt)
 summary
 if (summary$s > 0) stop("teams have different #games")
-season_games <- summary$m
-season_games
-```
-
-
-```{r}
-draws <- get_draws(country_list)
-draws
-```
-
-match this up with teams and league standings
-
-```{r}
-lookup <- get_lookup(country_list)
-basis <- get_basis(league_table, lookup)
-basis
-```
-
-```{r}
-games_left <- get_games_left(comp, games)
-simulated <- sim_games(games_left, lookup, country_list)
-simulated # data has id1 id2 (stan ids), sc1, sc2
-```
-
-```{r}
-simulated
+season_games1 <- summary$m
+season_games1
 ```
 
 
 
-```{r}
-simulated %>% 
-  ungroup() %>% 
-  rowwise() %>% 
-  mutate(simtab = list(simulated_table(data, basis))) %>% 
-  mutate(rk = list(simulated_rank(simtab))) -> d
-d %>% unnest(rk) %>% 
-  group_by(team_id) %>% 
-  count(rank) %>% 
-  mutate(cum_n = cumsum(n)) -> dd
-# save this and then consult by colour
-dd %>% 
-  filter(rank<=24) %>% 
-  group_by(team_id) %>% 
-  filter(rank==max(rank)) %>% 
-  arrange(desc(cum_n), rank)%>% 
-  left_join(lookup, by = c("team_id" = "sw_id")) %>% 
-  select(name, rank, cum_n)
-```
+
+
 
 
 
