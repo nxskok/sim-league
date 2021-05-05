@@ -134,9 +134,9 @@ extra_table <- function(d) {
                  names_to = c("set", ".value"),
                  names_pattern = "(.+)_(.+)") %>% 
     pivot_longer(!set) %>% 
-    pivot_wider(names_from = set, values_from = value) %>% 
-    unnest() %>% 
-    group_by(id) %>% 
+    pivot_wider(names_from = set, values_from = value)  %>%
+    unnest_legacy() %>%
+    group_by(id) %>%
     summarize(across(c(m, pt, f, a), ~sum(.)))
 }
 
@@ -154,4 +154,62 @@ simulated_table <- function(d, basis) {
 simulated_rank <- function(tab) {
   tab %>% mutate(rank = row_number()) %>% 
     select(team_id, rank)
+}
+
+make_rank <- function(sim, n_sim=1000) {
+  sim %>% 
+    ungroup() %>% 
+    slice_sample(n = n_sim) %>% 
+    rowwise() %>% 
+    mutate(simtab = list(simulated_table(data, basis))) %>% 
+    mutate(rk = list(simulated_rank(simtab))) -> d
+  d %>% unnest(rk) %>% 
+    group_by(team_id) %>% 
+    count(rank) %>% 
+    mutate(cum_n = cumsum(n))
+}
+
+get_ranks <- function(league_table) {
+  league_table %>% 
+    mutate(colour = 
+             ifelse(colour == "", "rank-grey", colour)) %>% 
+    select(colour) %>% 
+    mutate(lead_col = lead(colour)) %>% 
+    mutate(x = (colour != lead_col)) %>% 
+    pull(x) %>% which() -> y
+  y <- c(y, 99)
+  if (y[1]==1) return(y) else return(c(1, y))
+}
+
+display_rank <- function(d, rk) {
+  d %>% 
+    filter(rank<=rk) %>% 
+    group_by(team_id) %>% 
+    filter(rank==max(rank)) %>% 
+    arrange(desc(cum_n), rank)%>% 
+    left_join(lookup, by = c("team_id" = "sw_id")) %>% 
+    select(name, rank, cum_n)
+}
+
+display_ranks <- function(dd, rk) {
+  tibble(rk = rk) %>% 
+    rowwise() %>% 
+    mutate(disp = list(display_rank(dd, rk))) %>% 
+    unnest(disp) %>% 
+    select(-team_id, -rank) %>% 
+    pivot_wider(names_from = rk, values_from = cum_n)
+}
+
+run <- function(league_id, league_ids, comp_no = 1, games) {
+  country_list <- get_country(league_id, league_ids) 
+  comp <- country_list$comps[comp_no]
+  league_table <- get_league_table(comp) # have to get comp
+  draws <- get_draws(country_list)
+  lookup <- get_lookup(country_list)
+  basis <- get_basis(league_table, lookup)
+  games_left <- get_games_left(comp, games)
+  simulated <- sim_games(games_left, lookup, country_list)
+  dd <- make_rank(simulated, n_sim = 100)
+  rk <- get_ranks(league_table)
+  display_ranks(dd, rk)
 }
