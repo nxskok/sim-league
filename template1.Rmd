@@ -1,0 +1,9 @@
+# Probs for {{name}}, comp {{comp_no}}
+
+One simulation:
+
+```{r}
+{{gt::gt(tab1)}}
+```
+
+

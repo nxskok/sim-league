@@ -1,0 +1,3 @@
+open play3.Rmd in R-mode, run down to stop
+open run_play.R and run
+rmarkdown::render("display.Rmd")

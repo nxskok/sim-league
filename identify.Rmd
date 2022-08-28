@@ -1,0 +1,89 @@
+
+
+
+```{r}
+library(tidyverse)
+games <- read_rds("../scoresway/rds/games.rds")
+teams <- read_rds("../scoresway/rds/teams.rds")
+league_ids <- read_rds("../ratings/league_ids.rds")
+```
+
+```{r}
+league <- "Ireland"
+pat <- str_c(league, ";1;2*")
+v <- rev(list.files(path = ".", pattern = pat))
+```
+
+```{r}
+o1 <- read_rds(v[1])
+```
+
+```{r}
+o2 <- read_rds(v[2])
+```
+
+```{r}
+o1 %>% select(team_id:`99`) -> p1
+o1 %>% select(team_id, MP:mean_rank) -> tt
+o2 %>% select(team_id:`99`) -> p2
+```
+
+most recent
+
+```{r, echo=FALSE}
+o1 %>% left_join(teams, by = c("team_id"="id")) %>% 
+  select(-team_id) %>% 
+  select(name, everything()) %>% knitr::kable()
+```
+
+
+diffs
+
+```{r, echo=FALSE}
+p1 %>% pivot_longer(-team_id, names_to = "rank", values_to = "prob", 
+                    names_transform = list(rank = as.integer)) -> p1_long
+p2 %>% pivot_longer(-team_id, names_to = "rank", values_to = "prob",
+                    names_transform = list(rank = as.integer)) -> p2_long
+```
+
+```{r, echo=FALSE}
+p1_long %>% left_join(p2_long, by = c("team_id", "rank")) %>% 
+  replace_na(list(prob.x = 0, prob.y = 0)) %>% 
+  mutate(delta = prob.x - prob.y,
+         abs_delta = abs(delta)
+  ) %>% 
+  group_by(rank) %>% 
+  slice_max(abs_delta, n = 3, with_ties = FALSE) %>% 
+  left_join(teams, by = c("team_id"="id")) %>% 
+  select(name, rank, delta) %>% 
+  filter(rank < 99) -> delta_tab
+delta_tab %>% knitr::kable()
+```
+
+
+
+```{r, echo=FALSE}
+tibble(v) %>% 
+  slice(1:2) %>% 
+  extract(v, into = "dates", regex = "1;(2.*).rds$") %>% 
+  mutate(ddd = as.POSIXct(dates)) %>% 
+  pull(ddd) -> dates
+```
+
+```{r, echo=FALSE}
+league_ids %>% 
+  filter(the_country == league) %>% 
+  pull(id) -> league_id
+```
+
+```{r, echo=FALSE}
+games %>% 
+  filter(comp == league_id) %>% 
+  select(time_stamp, t1, t2, score) %>% 
+  filter(between(time_stamp, dates[2], dates[1])) %>% 
+  left_join(teams, by = c("t1"="id")) %>% 
+  left_join(teams, by = c("t2"="id")) %>% 
+  select(time_stamp, name.x, score, name.y) %>% 
+  knitr::kable()
+```
+

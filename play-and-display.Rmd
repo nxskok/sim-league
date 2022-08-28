@@ -1,0 +1,16 @@
+```{r}
+lname <- "Brazil"
+z <- rds_names(lname, 1)
+z
+tt <- tab_list(lname, 1)
+tt
+teams <- team_list(lname)
+teams
+get_diff(tt, teams) %>% 
+  pivot_longer(-name, names_to = "pos", values_to = "prob") %>%
+  mutate(abs_prob = abs(prob)) %>% 
+  extract(pos, "rank", "^([1-9]+).", convert = TRUE) %>% 
+  group_by(rank) %>% 
+  slice_max(abs_prob, n = 4)
+```
+

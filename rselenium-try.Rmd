@@ -1,0 +1,24 @@
+diagnosing url trouble
+
+```{r}
+library(rvest)
+my_url <- "https://uk.soccerway.com/national/sweden/allsvenskan/2022/regular-season/r67029/"
+my_url <- "https://bbc.co.uk"
+httr::set_config(httr::user_agent("Mozilla/5.0"))
+read_html(my_url)
+```
+
+can i get there with rselenium?
+
+```{r}
+library(RSelenium)
+remDr <- remoteDriver(port = 4445L)
+remDr$open()
+```
+
+```{r}
+remDr$navigate(my_url)
+remDr$getTitle()
+remDr$getPageSource()[[1]][1]
+```
+

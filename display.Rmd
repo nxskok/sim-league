@@ -1,0 +1,186 @@
+---
+title: "Latest odds"
+output: html_document
+---
+
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+```
+
+
+```{r, message=FALSE}
+library(tidyverse)
+library(knitr)
+library(rvest)
+library(lubridate)
+source("functions.R")
+```
+
+
+```{r}
+rds_names <- function(league_name, comp_no) {
+  v <- list.files(pattern = str_c(league_name, ";", comp_no, ";2*")) 
+  rev(v)[1:2] # if there are less than two, NAs from start (if only one, first one is NA)
+}
+
+rds_times <- function(league_name, comp_no) {
+  tibble(rdss = rds_names(league_name, comp_no)) %>% 
+    extract(rdss, into = "dt", regex = ";([^;]*).rds") %>% 
+    mutate(ddtt = ymd_hms(dt, tz = "America/Toronto")) %>% 
+    pull(ddtt)
+}
+
+tab_list <- function(league_name, comp_no) {
+  rds_files <- rds_names(league_name, comp_no)
+  tibble(rds_files) %>% 
+    drop_na() -> d
+  if (nrow(d) == 0) return(list())
+  d %>% 
+    rowwise() %>% 
+    mutate(tab = list(read_rds(rds_files))) %>% 
+    pull(tab)
+}
+
+team_list <- function(league_name) {
+  path <- "../ratings/"
+  pattn <- str_c(tolower(league_name), ".*_prior.csv")
+  fnames <- list.files(path = path, pattern = pattn, full.names = TRUE)
+  if (length(fnames)==0) stop(str_c("no prior for ", league_name))
+  fname <- rev(fnames)[1]
+  read_csv(fname) %>%
+    select(sw_id, name)
+} 
+
+league_stats <- function(sw_league_id, games) {
+  left <- get_games_left(sw_league_id, games, omits = 0)
+  library(RSelenium)
+  remDr <- remoteDriver(port = 4445L)
+  remDr$open(silent = TRUE)
+  lt <- get_league_table(sw_league_id, remDr)
+  remDr$close()
+  a <- season_games(lt, left) 
+  a$summary  
+}
+
+get_sw_league_id <- function(league_name, league_ids) {
+  league_ids %>% filter(the_country == league_name) %>% 
+    pull(id)
+}
+
+diff1 <- function(d) {
+    d %>% mutate(across(everything(), ~coalesce(., 0))) -> d
+    d[,1] - d[,2]
+  }
+col_diff <- function(d, col) {
+    # input the x col
+    # make the y col name
+    yname <- str_replace(col, ".x", ".y")
+    d %>% select({{col}}, {{yname}}) %>% 
+      mutate(dif = diff1(.)) %>% 
+      pull(dif)
+  }
+
+get_diff <- function(tt, teams) {
+  tt[[1]] %>% left_join(tt[[2]], by = "team_id") %>% 
+    select(team_id, matches("^[1-9]")) -> d
+  d %>% select(ends_with(".x")) %>% names() -> nms
+  map(nms, ~col_diff(d, .)) %>% bind_cols() -> z
+  z %>% mutate(team_id = tt[[1]]$team_id) %>% 
+    left_join(teams, by = c("team_id"="sw_id")) %>% 
+    select(-team_id) %>% 
+    select(name, everything())
+}
+
+diff_summary <- function(tt, teams) {
+  get_diff(tt, teams) %>% 
+    pivot_longer(-name, names_to = "pos", values_to = "prob") %>%
+    mutate(abs_prob = abs(prob)) %>% 
+    extract(pos, "rank", "^([1-9]+)\\.", convert = TRUE) %>% 
+    group_by(rank) %>% 
+    slice_max(abs_prob, n = 3, with_ties = FALSE) %>% 
+    select(-abs_prob) %>% 
+    pivot_wider(names_from = "rank", values_from = "prob")
+}
+
+get_games <- function(sw_id, tt, games) {
+  if (is.na(tt[2])) tt[2] <- date_decimal(1900)
+  games %>% filter(comp == sw_id) %>% 
+  filter(between(time_stamp, tt[2], tt[1])) %>% 
+  select(t1_name, t2_name, score, time_stamp) %>% 
+    arrange(time_stamp)
+}
+
+
+
+make_report_0 <- function(league_name, comp_no, teams, tabs) {
+  knit_expand(text = c("## {{league_name}}", "No odds yet", " "))
+}
+
+make_report_1 <- function(league_name, comp_no, teams, tabs, stats, tab_times, games, sw_league_id) {
+  tabs[[1]] %>% left_join(teams, by = c("team_id"="sw_id")) %>% 
+    select(-team_id) %>% 
+    mutate(rank = row_number()) %>% 
+    select(rank, name, everything()) -> ttt
+  gg <- get_games(sw_league_id, tab_times, games)
+  knit_expand(text = c("# {{league_name}}", 
+                       "## Stats", "{{kable(stats)}}", 
+                       "## Odds at {{tab_times[1]}}", 
+                       "{{kable(ttt)}}",
+                       "## Games", "{{kable(gg)}}"))
+}
+
+make_report_2 <- function(league_name, comp_no, teams, tabs, stats, tab_times, games, sw_league_id) {
+  tabs[[1]] %>% left_join(teams, by = c("team_id"="sw_id")) %>% 
+    select(-team_id) %>% 
+    mutate(rank = row_number()) %>% 
+    select(rank, name, everything()) -> ttt
+  diffs <- diff_summary(tabs, teams)
+  gg <- get_games(sw_league_id, tab_times, games)
+  knit_expand(text = c("# {{league_name}}", 
+                       "## Stats", "{{kable(stats)}}", 
+                       "## Odds at {{tab_times[1]}}", "{{kable(ttt)}}",
+                       "## Changes from {{tab_times[2]}}", "{{kable(diffs)}}",
+                       "## Games", "{{kable(gg)}}"))
+}
+
+
+make_report <- function(league_name, comp_no, league_ids, games) {
+  teams <- team_list(league_name)
+  tabs <- tab_list(league_name, comp_no)
+  tab_times <- rds_times(league_name, comp_no)
+  sw_league_id <- get_sw_league_id(league_name, league_ids)
+  league_ids %>% filter(the_country == league_name) %>% 
+    pull(id) -> sw_league_id
+  stats <- league_stats(sw_league_id, games)
+  if (length(tabs) == 0) {
+    a <- make_report_0(league_name, comp_no, teams, tabs)
+  } else if (length(tabs) == 1) {
+    a <- make_report_1(league_name, comp_no, teams, tabs, stats, tab_times, games, sw_league_id)
+  } else { 
+    a <- make_report_2(league_name, comp_no, teams, tabs, stats, tab_times, games, sw_league_id)
+  }
+  cat(a, sep = "\n")
+}
+```
+
+save league tables from before and read in now
+
+
+```{r, results='asis'}
+league_ids <- read_rds("../ratings/league_ids.rds")
+lids <- read_rds("lids.rds")
+# lids
+games <- read_rds("../scoresway/rds/games.rds")
+names <- lids$the_country
+comps <- rep(1, length(names))
+walk2(names, comps, ~make_report(.x, .y, league_ids, games))
+```
+
+
+```{r}
+# remDr$close()
+```
+
+
+

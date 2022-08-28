@@ -4,7 +4,7 @@
 
 get_country <- function(this_league, league_ids, prior_year = 2021) {
   league_ids %>% 
-    mutate(row = row_number()) %>% 
+    # mutate(row = row_number()) %>% 
     filter(row == this_league) -> d
   country_name <- d$the_country
   country_lower <- tolower(country_name)
@@ -18,17 +18,24 @@ get_country <- function(this_league, league_ids, prior_year = 2021) {
   prior <- read_csv(priorname)
   read_rds(postname) -> rat
   
-  list(name = country_name, comps = country_comps, 
+  list(name = country_name, comps = country_comps, priorname = priorname,
        prior = prior, rat = rat)
 }
 
 # league table from soccerway
 
-get_league_table <- function(league_id) {
-  base <- "https://uk.soccerway.com/national/andorra/1a-divisio/20202021/championship-round/r"
+get_league_table <- function(league_id, remDr, table_number = 2) {
+  base <- "https://uk.soccerway.com/national/sweden/allsvenskan/2022/regular-season/r"
   url <- str_c(base, league_id, "/")
-  html <- read_html(url)
-  html %>% html_nodes("table") %>% .[2] -> tab
+  # print(glue::glue("in get_league_table with league_id = ", {{league_id}}))
+  # print(glue::glue("getting url = ", {{url}}))
+  # html <- read_html(url)
+  # rselenium
+  remDr$navigate(url)
+  html_source <- remDr$getPageSource()[[1]][1]
+  html <- read_html(html_source)
+  # end of rselenium
+  html %>% html_nodes("table") %>% .[table_number] -> tab
   tab %>% html_nodes("tr") %>% html_attr("class") %>% 
     str_detect("team_rank") -> rows
   tab %>% html_table() %>% .[[1]] %>% 
@@ -46,9 +53,11 @@ get_league_table <- function(league_id) {
     mutate(colour = team_colours, team_id = team_ids)
 }
 
-get_games_left <- function(league_id, games) {
+get_games_left <- function(league_id, games, omits) {
   games %>% filter(comp == league_id, stat != "FT") %>% 
-    select(t1, t2) 
+    select(t1, t2) %>% 
+    filter(!(t1 %in% omits)) %>% 
+    filter(!(t2 %in% omits))
 }
 
 season_games <- function(league_table, games_left) {
@@ -60,6 +69,7 @@ season_games <- function(league_table, games_left) {
     mutate(mp = parse_number(MP)) %>% 
     select(team_id, mp) %>% 
     left_join(count_left) %>% 
+    mutate(n = ifelse(is.na(n), 0, n)) %>% 
     mutate(total = mp + n) %>% 
     select(team_id, games = total) -> d
   d %>% 
@@ -148,12 +158,14 @@ simulated_table <- function(d, basis) {
   e <- extra_table(d)
   # pb$tick()
   basis %>% left_join(e, by = c("stan_id" = "id")) %>% 
+    replace_na(list(m = 0, pt = 0, f = 0, a = 0)) -> b2
+  b2 %>% 
     mutate(m = as.numeric(MP) + m,
            pt = as.numeric(P) + pt,
            f = as.numeric(F) + f,
            a = as.numeric(A) + a) %>% 
     select(team_id, name, m, f, a, pt) %>% 
-    arrange(desc(pt), desc(f-a), desc(f))
+    arrange(desc(pt), desc(f-a), desc(f)) 
 }
 
 simulated_rank <- function(tab) {
@@ -163,6 +175,14 @@ simulated_rank <- function(tab) {
 
 make_rank <- function(sim, n_sim=1000, basis) {
   # print(glue::glue("n_sim in make_rank is {n_sim}."))
+  # if there are no games left, sim will be empty
+  if (nrow(sim) == 0) {
+    basis %>% 
+      mutate(rank = row_number()) %>% 
+      mutate(n = n_sim, cum_n = n_sim) %>% 
+      select(team_id, rank, n, cum_n) -> dd
+    return(dd)
+  }
   sim %>% 
     ungroup() %>% 
     slice_sample(n = n_sim) %>% 
@@ -173,6 +193,12 @@ make_rank <- function(sim, n_sim=1000, basis) {
     group_by(team_id) %>% 
     count(rank) %>% 
     mutate(cum_n = cumsum(n))
+}
+
+make_mean_rank <- function(made_ranks, n_sim) {
+  made_ranks %>% group_by(team_id) %>% 
+    summarize(mean_rank = sum(rank*n) / n_sim) %>% 
+    arrange(mean_rank)
 }
 
 get_ranks <- function(league_table) {
@@ -197,33 +223,59 @@ display_rank <- function(d, rk, lookup) {
     select(name, rank, cum_n)
 }
 
-display_ranks <- function(dd, rk, lookup) {
+display_ranks <- function(made_ranks, rk, mean_ranks, lookup, league_table) {
   tibble(rk = rk) %>% 
     rowwise() %>% 
-    mutate(disp = list(display_rank(dd, rk, lookup))) %>% 
+    mutate(disp = list(display_rank(made_ranks, rk, lookup))) %>% 
     unnest(disp) %>% 
     mutate(cum_n = cum_n * 1000 / max(cum_n)) %>% 
-    select(-team_id, -rank) %>% 
-    pivot_wider(names_from = rk, values_from = cum_n)
+    select(-rank) %>% 
+    pivot_wider(names_from = rk, values_from = cum_n) %>% 
+    left_join(league_table, by = "team_id") %>% 
+    select(team_id:P) %>% 
+    select(-Team) %>% 
+    left_join(mean_ranks) %>% 
+    arrange(mean_rank)
 }
 
-run <- function(league_id, league_ids, games,
-                comp_no = 1, n_sim = 100) {
+run <- function(league_id, league_ids, games, remDr, 
+                comp_no = 1, n_sim = 1000, omits = 0, prior_year = 2021, table_number = 2) {
   print(glue::glue("n_sim is {n_sim}."))
-  country_list <- get_country(league_id, league_ids) 
+  country_list <- get_country(league_id, league_ids, prior_year) 
   comp <- country_list$comps[comp_no]
-  league_table <- get_league_table(comp) 
+  league_table <- get_league_table(comp, remDr, table_number) 
+  print(glue::glue("Got league table."))
   draws <- get_draws(country_list)
+  print(glue::glue("Got draws."))
   lookup <- get_lookup(country_list)
+  print(glue::glue("Got lookup."))
   basis <- get_basis(league_table, lookup)
-  # cat("Done basis\n")
-  games_left <- get_games_left(comp, games)
-  # cat("done games left\n")
+  cat("Done basis\n")
+  games_left <- get_games_left(comp, games, omits)
+  cat("done games left\n")
   simulated <- sim_games(games_left, lookup, country_list)
-  # cat("done sim_games\n")
-  dd <- make_rank(simulated, n_sim, basis)
-  # cat("done make_rank\n")
+  cat("done sim_games\n")
+  made_ranks <- make_rank(simulated, n_sim, basis)
+  mean_ranks <- make_mean_rank(made_ranks, n_sim)
+  cat("done make_rank\n")
   rk <- get_ranks(league_table)
-  # cat("done get_ranks\n ")
-  display_ranks(dd, rk, lookup)
+  cat("done get_ranks\n ")
+  display_ranks(made_ranks, rk, mean_ranks, lookup, league_table) %>% select(-name)
+}
+
+
+check_league <- function(row_of_this, league_ids, remDr, comp_no = 1) {
+  league_id <- league_ids$row[row_of_this]
+  write_rds(league_id, "league_id_singular.rds")
+  country <- get_country(league_id, league_ids,   league_ids$prior_needed[row_of_this])
+  comp <- country$comps[comp_no]
+  name <- country$name
+  write_rds(name, "country_name.rds")
+  left <- get_games_left(comp, games, omits = 0)
+  # left %>% filter(t1 == 1870 | t2 == 1870)
+  print(glue::glue("Calling get_league_table with comp = {comp}"))
+  lt <- get_league_table(comp, remDr)
+  a <- season_games(lt, left) 
+  a$summary %>% mutate(the_name = name) -> summary
+  list(table = a$table, summary = summary)
 }

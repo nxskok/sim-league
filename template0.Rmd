@@ -1,0 +1,4 @@
+# Probs for {{name}}, comp {{comp_no}}
+
+No simulations so far.
+

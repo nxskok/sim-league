@@ -1,0 +1,72 @@
+```{r}
+row <- 76 # ukraine
+x <- get_country(row, league_ids)
+names(x)
+x$name
+x$comps
+comp <- x$comps[1]
+comp
+```
+
+```{r}
+lt <- get_league_table(comp)
+lt
+```
+
+```{r}
+lelft <- get_games_left(comp, games)
+lelft
+```
+
+```{r}
+season_games(lt, lelft)
+```
+
+```{r}
+season_summary(comp, games, lt)
+```
+
+```{r}
+lookup <- get_lookup(x)
+lookup
+```
+
+```{r}
+basis <- get_basis(lt, lookup)
+basis
+```
+
+```{r}
+lelft %>% 
+    left_join(lookup, by = c("t1"="sw_id")) %>% 
+    left_join(lookup, by = c("t2"="sw_id")) %>% 
+    select(id1 = stan_id.x, id2 = stan_id.y) -> left_stan
+left_stan
+```
+
+```{r}
+  get_draws(x) %>% 
+    ungroup() %>% 
+    nest_by(i) -> nested_draws
+nested_draws
+```
+
+```{r}
+d <- sim_games(lelft, lookup, x)
+d %>% unnest(data)
+```
+
+```{r}
+basis %>% 
+  mutate(rank = row_number()) %>% 
+  mutate(n = 10, cum_n = 10) %>% 
+  select(team_id, rank, n, cum_n)
+```
+
+
+make_rank:
+
+```{r}
+make_rank(d, 1000, basis)
+```
+
