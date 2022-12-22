@@ -9,16 +9,18 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE)
 ```
 
 
-```{r, message=FALSE}
+```{r packages, message=FALSE}
 library(tidyverse)
 library(knitr)
 library(rvest)
 library(lubridate)
+library(RSelenium)
 source("functions.R")
 ```
 
 
-```{r}
+
+```{r local functions}
 rds_names <- function(league_name, comp_no) {
   v <- list.files(pattern = str_c(league_name, ";", comp_no, ";2*")) 
   rev(v)[1:2] # if there are less than two, NAs from start (if only one, first one is NA)
@@ -44,21 +46,19 @@ tab_list <- function(league_name, comp_no) {
 
 team_list <- function(league_name) {
   path <- "../ratings/"
-  pattn <- str_c(tolower(league_name), ".*_prior.csv")
+  pattn <- str_c("^", tolower(league_name), "...._prior.csv")
   fnames <- list.files(path = path, pattern = pattn, full.names = TRUE)
+  # print(fnames)
   if (length(fnames)==0) stop(str_c("no prior for ", league_name))
   fname <- rev(fnames)[1]
   read_csv(fname) %>%
     select(sw_id, name)
 } 
 
-league_stats <- function(sw_league_id, games) {
+league_stats <- function(sw_league_id, games, remDr) {
+  # rselenium stuff woz here
   left <- get_games_left(sw_league_id, games, omits = 0)
-  library(RSelenium)
-  remDr <- remoteDriver(port = 4445L)
-  remDr$open(silent = TRUE)
   lt <- get_league_table(sw_league_id, remDr)
-  remDr$close()
   a <- season_games(lt, left) 
   a$summary  
 }
@@ -145,14 +145,14 @@ make_report_2 <- function(league_name, comp_no, teams, tabs, stats, tab_times, g
 }
 
 
-make_report <- function(league_name, comp_no, league_ids, games) {
+make_report <- function(league_name, comp_no, league_ids, games, remDr) {
   teams <- team_list(league_name)
   tabs <- tab_list(league_name, comp_no)
   tab_times <- rds_times(league_name, comp_no)
   sw_league_id <- get_sw_league_id(league_name, league_ids)
   league_ids %>% filter(the_country == league_name) %>% 
     pull(id) -> sw_league_id
-  stats <- league_stats(sw_league_id, games)
+  stats <- league_stats(sw_league_id, games, remDr)
   if (length(tabs) == 0) {
     a <- make_report_0(league_name, comp_no, teams, tabs)
   } else if (length(tabs) == 1) {
@@ -167,20 +167,22 @@ make_report <- function(league_name, comp_no, league_ids, games) {
 save league tables from before and read in now
 
 
-```{r, results='asis'}
+```{r action, results='asis'}
+remDr <- remoteDriver(port = 4445L)
+remDr$open(silent = TRUE)
+# remDr$navigate("http://www.flashscore.com")
+# remDr$getTitle()
 league_ids <- read_rds("../ratings/league_ids.rds")
 lids <- read_rds("lids.rds")
 # lids
 games <- read_rds("../scoresway/rds/games.rds")
 names <- lids$the_country
 comps <- rep(1, length(names))
-walk2(names, comps, ~make_report(.x, .y, league_ids, games))
+walk2(names, comps, ~make_report(.x, .y, league_ids, games, remDr))
+remDr$close()
 ```
 
 
-```{r}
-# remDr$close()
-```
 
 
 

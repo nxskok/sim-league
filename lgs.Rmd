@@ -1,0 +1,92 @@
+packages
+
+```{r}
+library(tidyverse)
+library(RSelenium)
+source("functions.R")
+```
+
+remDr
+
+```{r}
+remDr <- remoteDriver(port = 4445L)
+remDr$open(silent = TRUE)
+remDr$navigate("http://www.flashscore.com")
+remDr$getTitle()
+```
+
+
+get games
+
+```{r}
+league_ids <- read_rds("../ratings/league_ids.rds")
+lids <- read_rds("lids.rds")
+# lids
+games <- read_rds("../scoresway/rds/games.rds")
+```
+
+
+functions
+
+```{r}
+rds_names <- function(league_name, comp_no) {
+  v <- list.files(pattern = str_c(league_name, ";", comp_no, ";2*")) 
+  rev(v)[1:2] # if there are less than two, NAs from start (if only one, first one is NA)
+}
+
+rds_times <- function(league_name, comp_no) {
+  tibble(rdss = rds_names(league_name, comp_no)) %>% 
+    extract(rdss, into = "dt", regex = ";([^;]*).rds") %>% 
+    mutate(ddtt = ymd_hms(dt, tz = "America/Toronto")) %>% 
+    pull(ddtt)
+}
+
+league_stats <- function(sw_league_id, games, remDr) {
+  # rselenium stuff woz here
+  left <- get_games_left(sw_league_id, games, omits = 0)
+  lt <- get_league_table(sw_league_id, remDr)
+  a <- season_games(lt, left) 
+  a$summary  
+}
+tab_list <- function(league_name, comp_no) {
+  rds_files <- rds_names(league_name, comp_no)
+  tibble(rds_files) %>% 
+    drop_na() -> d
+  if (nrow(d) == 0) return(list())
+  d %>% 
+    rowwise() %>% 
+    mutate(tab = list(read_rds(rds_files))) %>% 
+    pull(tab)
+}
+```
+
+run
+
+
+```{r}
+league_ids
+lids %>% left_join(league_ids) -> z
+z
+stats <- league_stats(70820, games, remDr)
+stats
+lt <- get_league_table(70820, remDr)
+lt
+tab_list(z$the_country, z$rrr)
+with(z, rds_times(the_country, 1))
+nn <- with(z, rds_names(the_country, 1))
+nn
+read_rds(nn[1]) %>% 
+  select(team_id, MP) -> tbl
+tbl
+```
+
+pass sthg like this into season_games:
+
+
+```{r}
+gl <- get_games_left(70820, games, c())
+season_games(tbl, gl)
+```
+
+
+the only reason I am getting hold of the league table later is to get the game stats, which I ought to be able to do without, as above.

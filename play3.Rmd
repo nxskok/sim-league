@@ -66,8 +66,11 @@ league_ids %>%
   mutate(rrr = row_number()) %>% 
   select(rrr, the_country, last_rate, next_rate, get_games, rem_games) -> lids
 write_rds(lids, "lids.rds")
-lids
+lids %>% select(the_country, next_rate, rem_games) %>% View("leagues")
 ```
+
+
+
 
 open rselenium thingy
 
@@ -84,6 +87,8 @@ if that chokes, run selenium docker thingy first:
 ```
 # docker run -d -p 4445:4444 selenium/standalone-firefox
 ```
+
+this is the place to get and store league tables somehow
 
 
 

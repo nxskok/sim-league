@@ -109,7 +109,7 @@ if (length(v)==0) {
   is_results <- FALSE
   results <- thing
   beepr::beep(2)
-  stop("length of v is zero")
+  warning("length of v is zero")
 } else {
   is_results <- TRUE
   diff1 <- function(d) {
